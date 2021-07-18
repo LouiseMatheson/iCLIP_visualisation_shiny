@@ -26,6 +26,8 @@ BiocManager::install("BSgenome.Mmusculus.UCSC.mm10") # app only
 
 ## Instructions and test data
 
+Using the provided test data, preprocessing should take < 2 min to run on a standard desktop computer. The app should launch in < 1 min and, since the dataset is very small, respond to inputs almost immediately.
+
 ### preprocess_app_data.R
 
 This script provides the code used to process the data that goes into the shiny app - both of a GTF file, and of some CLIP crosslink and cluster data. This can be tested on the sample iCLIP crosslink data (iCLIP...chr17_100kb.txt files) and GTF (Mouse_GRCm38.90_chr17_100kb.gtf) provided here:
@@ -50,3 +52,30 @@ The app can be run by opening the app.R script in RStudio, and clicking on 'Run 
 A screenshot of how this should look, displaying Tnf together with the TATTTA motif, is shown below:
 
 ![alt text](https://github.com/LouiseMatheson/iCLIP_visualisation_shiny/blob/main/iCLIP_shiny_app/iCLIP_visualisation_app_Tnf.png?raw=true)
+
+
+## Adding complete CLIP datasets to the app
+
+Fastq files for the CLIP data generated and/or analysed in our manuscript (https://www.biorxiv.org/content/10.1101/2021.06.03.446738v2) are available via the GEO accessions GSE176313 (ZFP36L1 CLIP) and GSE96074 (ZFP36 CLIP).
+
+Before they can be added to the app, significant crosslink sites and clusters should first be identified using the iCount pipeline (documentation and instructions: https://icount.readthedocs.io/en/latest/).
+
+The required output files from iCount are:
+
+1. tab-delimited text files from iCount peaks, generated using the --scores parameter (ie, including all crosslink sites, together with the score and FDR)
+2. BED files output from iCount clusters.
+
+A complete GTF file for the same genome build as used by iCount is also required (eg one option for GRCm38: http://ftp.ensembl.org/pub/release-102/gtf/mus_musculus/Mus_musculus.GRCm38.102.gtf.gz)
+
+The following modifications then need to be made to the script to incorporate the full data files:
+1. Replace sample GTF file name with full GTF
+2. Replace filenames in read_tsv for sample iCLIP crosslink data with the full datasets; duplicate as many times as necessary to include all data
+3. bind_rows() of all crosslink datasets that have been imported, adding appropriate sample names (optional: find and replace 'all_test_CLIP_data' with 'all_CLIP_data' throughout)
+4. Modify the path where the individual chromosome data from all_CLIP_data is saved to be CLIP_data (rather than test_CLIP_data). If additional types of data are imported, these can be separated out and saved into separate subfolders.
+5. Modify the code for creating CLIP_datasets to ensure that a) each sample name is assigned to the correct 'dataset' (ie, group of replicates), and appropriate names are provided for each dataset; b) if any additional types of data have been added, these are correctly picked up as a separate 'Type'; c) all samples for which there are replicate datasets are picked up and 'replicates' is set to T for these.
+6. If additional data types and therefore subfolders containing the CLIP data have been added, ensure the subfolder paths are defined for each Type of data in CLIPdata_paths. 
+7. Replace filenames for sample iCLIP cluster data with the full datasets, and set the 'dataset' to correspond to the Sample name assigned to the crosslinks for that replicate; duplicate bind_rows(add_column(read_tsv(...))) rows as many times as necessary to include all data.
+8. For datasets with replicates, duplicate and modify the code for creating GRanges objects and merging based on intersections to perform this for each group of replicate data. Where more than 3 replicates are present, all pairwise intersections should be included. In this case, 'dataset' should correspond to the dataset name assigned to the crosslinks.
+
+
+Once preprocessing has been completed, no modification to the app.R code should be necessary, and the full datasets should now be detected when it is run. 
