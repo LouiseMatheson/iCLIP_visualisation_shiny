@@ -208,11 +208,7 @@ server <- function(input, output) {
   )
   
   observeEvent(input$CLIP_type, {
-    if(input$CLIP_type == "ZFP36-family CLIP") {
-      rv$CLIPpath <- "CLIP_data/"
-    } else {
-      rv$CLIPpath <- "m6A_data/"
-    }
+    rv$CLIPpath <- CLIPdata_paths$path[CLIPdata_paths$Type == input$CLIP_type]
   })
   
   observeEvent(input$titleBtId, {

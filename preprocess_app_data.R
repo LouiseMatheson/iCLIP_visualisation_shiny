@@ -106,51 +106,67 @@ read_tsv("iCLIP_rep3_chr17_100kb.txt") %>%
 iCLIP_rep1_data %>%
   add_column(Sample = "Replicate_1") %>%
   bind_rows(add_column(iCLIP_rep2_data, Sample = "Replicate_2")) %>%
-  bind_rows(add_column(iCLIP_rep3_data, Sample = "Replicate_3")) -> all_CLIP_data
+  bind_rows(add_column(iCLIP_rep3_data, Sample = "Replicate_3")) -> all_test_CLIP_data
 
-for(c in unique(all_CLIP_data$chromosome)) {
-  all_CLIP_data %>%
+for(c in unique(all_test_CLIP_data$chromosome)) {
+  all_test_CLIP_data %>%
     filter(chromosome == c) %>%
-    saveRDS(paste0("iCLIP_shiny_app/CLIP_data/merged_CLIP_chr", c, ".Rds"))
+    saveRDS(paste0("iCLIP_shiny_app/test_CLIP_data/merged_CLIP_chr", c, ".Rds"))
 }
+# Other types of data should be joined into a separate merged tibble, and saved in a different subfolder (defined in CLIPdata_paths below).
+# This is to avoid loading too much data at once
 
-
-all_CLIP_data %>%
+all_test_CLIP_data %>% # if other types of data included, bind_rows() to join all together (before or after finding distinct samples for each)
   distinct(Sample) %>%
-  add_column(label = c("iCLIP replicate 1", "iCLIP replicate 2", "iCLIP replicate 3")) %>%
-  mutate(dataset = case_when(
+  add_column(label = c("iCLIP replicate 1", "iCLIP replicate 2", "iCLIP replicate 3")) %>% #currently have to be added manually in the order samples were joined
+  mutate(dataset = case_when( # this includes examples of how these would be defined for a larger number of datasets - if corresponding samples are not present they will be ignored
     grepl("^CD8.*WT", Sample) ~ "CD8 T cell iCLIP, WT",
     grepl("^CD8.*KO", Sample) ~ "CD8 T cell iCLIP, KO",
     grepl("Darnell_4h", Sample) ~ "Darnell CD4 T cell HITS-CLIP, 4h activation",
     grepl("Darnell_72h", Sample) ~ "Darnell CD4 T cell HITS-CLIP, 72h + reactivation",
     grepl("^m6A_eCLIP", Sample) ~ "iGB m6A eCLIP",
     grepl("^m6A.*input", Sample) ~ "iGB m6A input",
-    grepl("^Replicate", Sample) ~ "iCLIP test data",
-    TRUE ~ label
+    grepl("^Replicate", Sample) ~ "iCLIP test data", # with the test data, this is the only line where correponding samples will be found
+    TRUE ~ label # this is for anything where there are not replicates, so the dataset is equal to the sample label
   )) %>%
-  mutate(Type = if_else(grepl("m6A", dataset), "m6A eCLIP", "ZFP36-family CLIP")) %>%
-  mutate(replicates = case_when(
+  mutate(Type = case_when(
+    grepl("m6A", dataset)~ "m6A eCLIP", 
+    grepl("test", dataset)~ "Test data",  # this line will correspond to the test data, others ignored here.
+    TRUE ~ "ZFP36-family CLIP"
+    )) %>%
+  mutate(replicates = case_when( # tells the app whether or not there are replicates to add together when 'merge replicate datasets' is ticked
     grepl("^CD8", Sample) ~ T,
     grepl("Darnell_4h", Sample) ~ T,
     grepl("Darnell_72h", Sample) ~ T,
     grepl("m6A_eCLIP", Sample) ~ T,
     grepl("m6A_input", Sample) ~ T,
-    grepl("^Replicate", Sample) ~ T,
+    grepl("^Replicate", Sample) ~ T, # this line will correspond to the test data, others ignored here.
     TRUE ~ F
   ))  -> CLIP_datasets
+
+
+CLIP_datasets %>%
+  distinct(Type) %>%
+  mutate(path = case_when(
+    grepl("m6A", Type) ~ "m6A_data/", 
+    grepl("Test", Type) ~ "test_CLIP_data/",  # this line will correspond to the test data, others ignored here.
+    TRUE ~ "CLIP_data/"
+  )) -> CLIPdata_paths
 
 
 ## iCLIP clusters
 
 # For this, use the iCLIP_clusters_rep[1-3].txt file in test_data
+# In the case of cluster data, since it is much smaller, clusters for all samples/types of data are merged into a single dataset.
+# These are assumed to be saved into the CLIP_data subfolder (rather than the subfolder corresponding to the data type).
 
 read_tsv("test_data/iCLIP_clusters_rep1.txt") %>%
-  add_column(dataset = "Replicate_1") %>%
+  add_column(dataset = "Replicate_1") %>% # at this stage, 'dataset' should correspond to the Sample name from CLIP_datasets for individual replicate samples (or those that don't have replicates)
   bind_rows(add_column(read_tsv("test_data/iCLIP_clusters_rep2.txt"), dataset = "Replicate_2")) %>%
   bind_rows(add_column(read_tsv("test_data/iCLIP_clusters_rep3.txt"), dataset = "Replicate_3")) %>%
   mutate(chromosome = sub("chr", "", chromosome)) %>%
   mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
-  filter(chromosome %in% all_CLIP_data$chromosome) %>%
+  filter(chromosome %in% all_test_CLIP_data$chromosome) %>%
   select(1:3, 6, 7) -> all_clusters
 
 # Make cluster track for merged replicates - requiring intersect of at least 2 replicates
@@ -164,7 +180,7 @@ c(IRanges::intersect(Rep1_clusterGR, Rep2_clusterGR), IRanges::intersect(Rep1_cl
   as_tibble() %>%
   rename(chromosome = seqnames) %>%
   select(-width) %>%
-  add_column(dataset = "iCLIP test data") %>%
+  add_column(dataset = "iCLIP test data") %>% # for merged replicates, dataset should correspond to the dataset name from CLIP_datasets
   bind_rows(all_clusters) -> all_clusters
 
 # When samples are merged, we need to be selecting based on dataset names from CLIP_datasets, whereas 
@@ -188,4 +204,5 @@ for(c in unique(all_clusters$chromosome)) {
     saveRDS(paste0("iCLIP_shiny_app/CLIP_data/merged_clusters_chr", c, ".Rds"))
 }
 
-save(gene_coord, gene_names_ids, gene_summary, CLIP_datasets, file = "iCLIP_shiny_app/CLIP_tool_data.RData")
+
+save(gene_coord, gene_names_ids, gene_summary, CLIP_datasets, CLIPdata_paths, file = "iCLIP_shiny_app/CLIP_tool_data.RData")
