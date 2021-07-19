@@ -272,7 +272,7 @@ server <- function(input, output) {
     })
     
     output$CLIP_datasets <- renderUI({
-      checkboxGroupInput("CLIPdatasets", NULL, choiceNames = unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type]), choiceValues = unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type]), selected = if(input$CLIP_type == "ZFP36-family CLIP") { unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type])[1:3] } else { unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type])[1]})
+      checkboxGroupInput("CLIPdatasets", NULL, choiceNames = unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type]), choiceValues = unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type]), selected = unique(CLIP_datasets$dataset[CLIP_datasets$Type == input$CLIP_type])[1])
     })
     
     output$height_slider <- renderUI({
@@ -544,7 +544,7 @@ server <- function(input, output) {
     
     Clusterdata_chrom <- reactive({ 
       if(nchar(rv$chromosome) > 0) {
-        readRDS(paste0("CLIP_data/merged_clusters_chr", rv$chromosome, ".Rds")) 
+        readRDS(paste0("Cluster_data/merged_clusters_chr", rv$chromosome, ".Rds")) 
       }
     })
     

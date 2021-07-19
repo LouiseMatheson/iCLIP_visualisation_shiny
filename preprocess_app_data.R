@@ -3,11 +3,20 @@ library(GenomicRanges)
 library(rtracklayer)
 library(tidyverse)
 
+gtf_filepath <- "test_data/Mouse_GRCm38.90_chr17_100kb.gtf"
+CLIP_sample_template <- "test_data/CLIPdata_template_test.txt"
 
 # As a test, GTF file and CLIP dataset subsets covering a 100kb region of chromosome 17 can be used - these can be found here:
 # https://github.com/LouiseMatheson/Process_CLIP_data/tree/main/test_data
 # The region is chr17:35150000-35250000 (GRCm38) and encompasses several genes, including Tnf and Lta over which we expect to see crosslinks
-import("Mouse_GRCm38.90_chr17_100kb.gtf") %>%
+
+# A sample template providing sample/dataset names and file paths for each sample is provided in test_data/CLIPdata_template_sample.txt.
+
+# The filepaths to the GTF and the sample template describing all samples to be included need to be provided at the start of the script - 
+# if all input files are in the correct format, no other changes to the script should be required.
+
+
+import(gtf_filepath) %>%
   as_tibble() -> gtf_file
 
 gtf_file %>%
@@ -80,115 +89,140 @@ gene_coord %>%
 # name from gene_names_ids, and use this to access gene coordinates and summary.
 
 
-### CLIP data - crosslinks
+### CLIP data - crosslinks and clusters
 
-read_tsv("iCLIP_rep1_chr17_100kb.txt") %>%
-  select(1:3,6,8) %>%
-  rename(chromosome = chrom, crosslinks = score) %>%
-  mutate(chromosome = sub("chr", "", chromosome)) %>%
-  mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
-  filter(chromosome %in% gtf_filtered_converted$chromosome) -> iCLIP_rep1_data
-
-read_tsv("iCLIP_rep2_chr17_100kb.txt") %>%
-  select(1:3,6,8) %>%
-  rename(chromosome = chrom, crosslinks = score) %>%
-  mutate(chromosome = sub("chr", "", chromosome)) %>%
-  mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
-  filter(chromosome %in% gtf_filtered_converted$chromosome) -> iCLIP_rep2_data
-
-read_tsv("iCLIP_rep3_chr17_100kb.txt") %>%
-  select(1:3,6,8) %>%
-  rename(chromosome = chrom, crosslinks = score) %>%
-  mutate(chromosome = sub("chr", "", chromosome)) %>%
-  mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
-  filter(chromosome %in% gtf_filtered_converted$chromosome) -> iCLIP_rep3_data
-
-iCLIP_rep1_data %>%
-  add_column(Sample = "Replicate_1") %>%
-  bind_rows(add_column(iCLIP_rep2_data, Sample = "Replicate_2")) %>%
-  bind_rows(add_column(iCLIP_rep3_data, Sample = "Replicate_3")) -> all_test_CLIP_data
-
-for(c in unique(all_test_CLIP_data$chromosome)) {
-  all_test_CLIP_data %>%
-    filter(chromosome == c) %>%
-    saveRDS(paste0("iCLIP_shiny_app/test_CLIP_data/merged_CLIP_chr", c, ".Rds"))
+read_tsv(CLIP_sample_template) %>%
+  rename_with(~ tolower(.x)) %>%
+  mutate(out_path = sub("iCLIP_shiny_app/", "", out_path)) -> all_CLIP_sample_data
+if(!"type" %in% colnames(all_CLIP_sample_data)) {
+  all_CLIP_sample_data %>%
+    add_column(type = "Unspecified") -> all_CLIP_sample_data
 }
-# Other types of data should be joined into a separate merged tibble, and saved in a different subfolder (defined in CLIPdata_paths below).
-# This is to avoid loading too much data at once
+if(!"cluster_path" %in% colnames(all_CLIP_sample_data)) {
+  all_CLIP_sample_data %>%
+    add_column(cluster_path = NA) -> all_CLIP_sample_data
+}
 
-all_test_CLIP_data %>% # if other types of data included, bind_rows() to join all together (before or after finding distinct samples for each)
-  distinct(Sample) %>%
-  add_column(label = c("iCLIP replicate 1", "iCLIP replicate 2", "iCLIP replicate 3")) %>% #currently have to be added manually in the order samples were joined
-  mutate(dataset = case_when( # this includes examples of how these would be defined for a larger number of datasets - if corresponding samples are not present they will be ignored
-    grepl("^CD8.*WT", Sample) ~ "CD8 T cell iCLIP, WT",
-    grepl("^CD8.*KO", Sample) ~ "CD8 T cell iCLIP, KO",
-    grepl("Darnell_4h", Sample) ~ "Darnell CD4 T cell HITS-CLIP, 4h activation",
-    grepl("Darnell_72h", Sample) ~ "Darnell CD4 T cell HITS-CLIP, 72h + reactivation",
-    grepl("^m6A_eCLIP", Sample) ~ "iGB m6A eCLIP",
-    grepl("^m6A.*input", Sample) ~ "iGB m6A input",
-    grepl("^Replicate", Sample) ~ "iCLIP test data", # with the test data, this is the only line where correponding samples will be found
-    TRUE ~ label # this is for anything where there are not replicates, so the dataset is equal to the sample label
-  )) %>%
-  mutate(Type = case_when(
-    grepl("m6A", dataset)~ "m6A eCLIP", 
-    grepl("test", dataset)~ "Test data",  # this line will correspond to the test data, others ignored here.
-    TRUE ~ "ZFP36-family CLIP"
-    )) %>%
-  mutate(replicates = case_when( # tells the app whether or not there are replicates to add together when 'merge replicate datasets' is ticked
-    grepl("^CD8", Sample) ~ T,
-    grepl("Darnell_4h", Sample) ~ T,
-    grepl("Darnell_72h", Sample) ~ T,
-    grepl("m6A_eCLIP", Sample) ~ T,
-    grepl("m6A_input", Sample) ~ T,
-    grepl("^Replicate", Sample) ~ T, # this line will correspond to the test data, others ignored here.
-    TRUE ~ F
-  ))  -> CLIP_datasets
+all_CLIP_sample_data %>%
+  # some have uppercase in app and code below so simpler to rename than change everything..!
+  rename(Sample = sample, Type = type) %>%
+  mutate(Type = if_else(is.na(Type), "Unspecified", as.character(Type))) %>%
+  group_by(Sample) %>%
+  mutate(replicates = sum(all_CLIP_sample_data$dataset == dataset)>1) %>%
+  mutate(dataset = if_else(replicates == T, dataset, label)) %>% # force dataset to equal label if there aren't replicates 
+  ungroup() -> all_CLIP_sample_data
 
 
-CLIP_datasets %>%
-  distinct(Type) %>%
-  mutate(path = case_when(
-    grepl("m6A", Type) ~ "m6A_data/", 
-    grepl("Test", Type) ~ "test_CLIP_data/",  # this line will correspond to the test data, others ignored here.
-    TRUE ~ "CLIP_data/"
-  )) -> CLIPdata_paths
+# could add a check and warning if any 'Type' has more than one out_path assigned (since the data will only be loaded from one place at once, would potentially cause issues)
+# But for now assume the template is completed correctly!
+
+# initiate empty list to store all cluster data
+all_clusters <- list()
+
+for(outpath in unique(all_CLIP_sample_data$out_path)) {
+  all_CLIP_sample_data %>%
+    filter(out_path == outpath) -> subset_CLIP_sample_data
+  lapply(subset_CLIP_sample_data$xlink_path, function(x) {
+    if(grepl("bed$|bed.gz$", x)) {
+      read_tsv(x, col_names = c("chromosome", "start", "end", "name", "score", "strand"), col_types = cols(chromosome = col_character())) -> CLIPdata_temp
+    } else {
+      read_tsv(x, col_types = cols(chromosome = col_character(), chrom = col_character())) -> CLIPdata_temp
+      # will give a warning as one won't be found, but missing is just ignored
+    }
+    if(!"FDR" %in% colnames(CLIPdata_temp)) {
+      CLIPdata_temp %>%
+        add_column(FDR = 0) -> CLIPdata_temp
+    }
+    CLIPdata_temp %>%
+      rename_with(~ tolower(.x)) %>%
+      rename(FDR = fdr) %>%
+      rename_with(~ sub("^end$", "position", .x)) %>% # means it can have start/end or position in input data; take end since in BED format this is the actual position
+      rename_with(~ sub("^hit_position$", "position", .x)) %>% # legacy from files analysed through iCount prior to Genialis
+      rename_with(~ sub("^chrom$", "chromosome", .x)) %>% # accepts either chrom or chromosome in input data
+      rename_with(~ sub("^score$", "crosslinks", .x)) %>% # accepts either score or crosslinks in input data
+      rename_with(~ sub("^value..unknown_counts.$", "crosslinks", .x)) %>% # legacy from files analysed through iCount prior to Genialis
+      select(chromosome, position, strand, crosslinks, FDR) %>%
+      mutate(chromosome = sub("chr", "", chromosome)) %>%
+      mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
+      filter(chromosome %in% gtf_filtered_converted$chromosome) -> CLIPdata_temp
+    if(is.numeric(CLIPdata_temp$strand)) {
+      CLIPdata_temp$strand <- as.character(factor(CLIPdata_temp$strand, levels = c(-1,1), labels = c("-", "+")))
+    }
+    return(CLIPdata_temp)
+  }) -> subset_CLIP_data
+  names(subset_CLIP_data) <- subset_CLIP_sample_data$Sample
+  bind_rows(subset_CLIP_data, .id = "Sample") -> subset_CLIP_data
+  for(ch in unique(gene_coord$chromosome)) {
+    subset_CLIP_data %>%
+      filter(chromosome == ch) %>%
+      saveRDS(paste0("iCLIP_shiny_app/", sub("/$", "", outpath), "/merged_CLIP_chr", ch, ".Rds"))
+  }
+  
+  lapply(na.omit(subset_CLIP_sample_data$cluster_path), function(x) {
+    if(grepl("bed$|bed.gz$", x)) {
+      read_tsv(x, col_names = c("chromosome", "start", "end", "name", "score", "strand"), col_types = cols(chromosome = col_character())) %>% 
+        mutate(start = start + 1) -> Cluster_temp
+    } else {
+      read_tsv(x, col_types = cols(chromosome = col_character(), chrom = col_character())) %>%
+        rename_with(~ tolower(.x)) -> Cluster_temp
+    }
+    if(is.numeric(Cluster_temp$strand)) {
+      Cluster_temp$strand <- as.character(factor(Cluster_temp$strand, levels = c(-1,1), labels = c("-", "+")))
+    }
+    Cluster_temp %>%
+      rename_with(~ sub("^chrom$", "chromosome", .x)) %>% # accepts either chrom or chromosome in input data
+      mutate(chromosome = sub("chr", "", chromosome)) %>%
+      mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
+      filter(chromosome %in% gtf_filtered_converted$chromosome) %>%
+      select(chromosome, start, end, strand)
+  }) -> subset_cluster_data
+  names(subset_cluster_data) <- subset_CLIP_sample_data$Sample[!is.na(subset_CLIP_sample_data$cluster_path)]
+  
+  
+  for(ds in unique(subset_CLIP_sample_data$dataset[subset_CLIP_sample_data$replicates == T & !is.na(subset_CLIP_sample_data$cluster_path)])) {
+    lapply(subset_cluster_data[subset_CLIP_sample_data$Sample[subset_CLIP_sample_data$dataset == ds]], function(x) {
+      with(x, GRanges(chromosome, IRanges(start, end), strand = strand))
+    }) -> clusters_GR
+    
+    merged_clusters <- GRanges()
+    for(i in 1:(length(clusters_GR)-1))  {
+      for(j in (i+1):length(clusters_GR)) {
+        merged_clusters <- c(merged_clusters, IRanges::intersect(clusters_GR[[i]], clusters_GR[[j]]))
+      }
+    }
+    merged_clusters %>%
+      GenomicRanges::reduce() %>%
+      as_tibble() %>%
+      rename(chromosome = seqnames) %>%
+      select(-width) -> subset_cluster_data[[ds]]
+  }
+  all_clusters <- c(all_clusters, subset_cluster_data)
+}
 
 
-## iCLIP clusters
+all_CLIP_sample_data %>%
+  select(Sample, label, dataset, Type, replicates) -> CLIP_datasets
 
-# For this, use the iCLIP_clusters_rep[1-3].txt file in test_data
-# In the case of cluster data, since it is much smaller, clusters for all samples/types of data are merged into a single dataset.
-# These are assumed to be saved into the CLIP_data subfolder (rather than the subfolder corresponding to the data type).
 
-read_tsv("test_data/iCLIP_clusters_rep1.txt") %>%
-  add_column(dataset = "Replicate_1") %>% # at this stage, 'dataset' should correspond to the Sample name from CLIP_datasets for individual replicate samples (or those that don't have replicates)
-  bind_rows(add_column(read_tsv("test_data/iCLIP_clusters_rep2.txt"), dataset = "Replicate_2")) %>%
-  bind_rows(add_column(read_tsv("test_data/iCLIP_clusters_rep3.txt"), dataset = "Replicate_3")) %>%
-  mutate(chromosome = sub("chr", "", chromosome)) %>%
-  mutate(chromosome = sub("^M$", "MT", chromosome)) %>%
-  filter(chromosome %in% all_test_CLIP_data$chromosome) %>%
-  select(1:3, 6, 7) -> all_clusters
+all_CLIP_sample_data %>%
+  distinct(Type, out_path) %>%
+  rename(path = out_path) -> CLIPdata_paths
 
-# Make cluster track for merged replicates - requiring intersect of at least 2 replicates
-with(filter(all_clusters, dataset == "Replicate_1"), GRanges(chromosome, IRanges(start, end), strand = strand)) -> Rep1_clusterGR
-with(filter(all_clusters, dataset == "Replicate_2"), GRanges(chromosome, IRanges(start, end), strand = strand)) -> Rep2_clusterGR
-with(filter(all_clusters, dataset == "Replicate_3"), GRanges(chromosome, IRanges(start, end), strand = strand)) -> Rep3_clusterGR
-
-c(IRanges::intersect(Rep1_clusterGR, Rep2_clusterGR), IRanges::intersect(Rep1_clusterGR, Rep3_clusterGR), IRanges::intersect(Rep2_clusterGR, Rep3_clusterGR)
-) %>%
-  GenomicRanges::reduce() %>%
-  as_tibble() %>%
-  rename(chromosome = seqnames) %>%
-  select(-width) %>%
-  add_column(dataset = "iCLIP test data") %>% # for merged replicates, dataset should correspond to the dataset name from CLIP_datasets
-  bind_rows(all_clusters) -> all_clusters
+# Clusters - sorting out sample/dataset annotations, since in the list of cluster data, Sample is used to name 
+# those for individual replicates, whilst dataset is used to name merged.
 
 # When samples are merged, we need to be selecting based on dataset names from CLIP_datasets, whereas 
 # when not merged we need to use sample names. Need separate columns to define these so that both options 
 # are there for those that don't have multiple replicates (otherwise you just don't get clusters for those 
 # displayed when replicates are merged)
 
+# Also - if there are no clusters for any dataset, need to provide an empty tibble so it does not fail
+
+if(length(all_clusters) == 0) {
+  all_clusters <- tibble(dataset = character(), chromosome = character(), start = double(), end = double(), strand = character(), sample = character())
+}
 all_clusters %>%
+  bind_rows(.id = "dataset") %>%
   mutate(sample = if_else(dataset %in% CLIP_datasets$Sample, dataset, NA_character_)) %>%
   mutate(dataset = if_else(dataset %in% CLIP_datasets$dataset, dataset, CLIP_datasets$dataset[match(dataset, CLIP_datasets$Sample)])) -> all_clusters
 
@@ -198,10 +232,10 @@ all_clusters %>%
 all_clusters %>% 
   mutate(dataset = if_else(sample %in% CLIP_datasets$Sample[CLIP_datasets$replicates == T], NA_character_, dataset)) -> all_clusters
 
-for(c in unique(all_clusters$chromosome)) {
+for(ch in unique(gene_coord$chromosome)) {
   all_clusters %>%
-    filter(chromosome == c) %>%
-    saveRDS(paste0("iCLIP_shiny_app/CLIP_data/merged_clusters_chr", c, ".Rds"))
+    filter(chromosome == ch) %>%
+    saveRDS(paste0("iCLIP_shiny_app/Cluster_data/merged_clusters_chr", ch, ".Rds"))
 }
 
 

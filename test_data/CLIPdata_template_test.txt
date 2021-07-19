@@ -1,0 +1,4 @@
+xlink_path	sample	out_path	label	dataset	type	cluster_path
+test_data/iCLIP_rep1_chr17_100kb.txt	Replicate_1	test_CLIP_data/	iCLIP replicate 1	iCLIP test data	Test data	test_data/iCLIP_clusters_rep1.txt
+test_data/iCLIP_rep2_chr17_100kb.txt	Replicate_2	test_CLIP_data/	iCLIP replicate 2	iCLIP test data	Test data	test_data/iCLIP_clusters_rep2.txt
+test_data/iCLIP_rep3_chr17_100kb.txt	Replicate_3	test_CLIP_data/	iCLIP replicate 3	iCLIP test data	Test data	test_data/iCLIP_clusters_rep3.txt
